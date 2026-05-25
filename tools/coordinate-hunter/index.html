@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>座標獵人</title>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --fg: #f5f5f5;
+    --accent: #ff8a3d;
+    --accent-dim: #b85a1f;
+    --grid: #2a2a2a;
+    --grid-axis: #555;
+    --hit: #ff8a3d;
+    --miss: #4a4a4a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    user-select: none;
+  }
+  h1 {
+    margin: 10px 0 4px;
+    font-size: 2.2em;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 12px rgba(255, 138, 61, 0.3);
+  }
+  .subtitle {
+    opacity: 0.6;
+    font-size: 0.9em;
+    margin-bottom: 16px;
+  }
+  .hud {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 16px;
+    font-size: 1.2em;
+  }
+  .hud span { color: var(--accent); font-weight: bold; font-size: 1.3em; }
+  .board {
+    background: var(--bg);
+    border: 2px solid var(--grid);
+    border-radius: 4px;
+    padding: 8px;
+  }
+  .input-row {
+    margin-top: 16px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  input[type="text"] {
+    background: #1a1a1a;
+    color: var(--fg);
+    border: 2px solid var(--grid);
+    padding: 10px 14px;
+    font-size: 1.1em;
+    border-radius: 4px;
+    width: 140px;
+    text-align: center;
+    font-family: monospace;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  button {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    padding: 10px 20px;
+    font-size: 1em;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  button:hover { background: #ffa05c; transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 2px solid var(--accent);
+  }
+  .message {
+    margin-top: 12px;
+    min-height: 1.5em;
+    font-size: 1.05em;
+    text-align: center;
+    transition: color 0.2s;
+  }
+  .message.hit { color: var(--accent); font-weight: bold; }
+  .message.miss { color: #888; }
+  .message.dup { color: #f5d76e; }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.92);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 100;
+  }
+  .overlay.show { display: flex; }
+  .overlay h2 {
+    color: var(--accent);
+    font-size: 3em;
+    margin: 0 0 10px;
+    text-shadow: 0 0 16px rgba(255, 138, 61, 0.5);
+  }
+  .overlay .final-score {
+    font-size: 4em;
+    color: var(--fg);
+    margin: 10px 0;
+    font-weight: bold;
+  }
+  .overlay .final-score .total {
+    color: #666;
+    font-size: 0.6em;
+  }
+  .overlay .feedback {
+    color: var(--fg);
+    opacity: 0.7;
+    margin-bottom: 24px;
+    font-size: 1.1em;
+  }
+  .hint {
+    margin-top: 18px;
+    opacity: 0.5;
+    font-size: 0.85em;
+    text-align: center;
+    max-width: 480px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<h1>座標獵人</h1>
+<div class="subtitle">— 直角座標練習 —</div>
+
+<div class="hud">
+  <div>得分 <span id="score">0</span> / 10</div>
+  <div>剩餘 <span id="timer">60</span> 秒</div>
+</div>
+
+<svg id="board" class="board" width="528" height="528" viewBox="0 0 528 528"></svg>
+
+<div class="input-row">
+  <input type="text" id="guess" placeholder="例：2,-3" autocomplete="off" autofocus>
+  <button id="submitBtn">射擊</button>
+  <button id="restartBtn" class="secondary">重新開始</button>
+</div>
+
+<div class="message" id="message">輸入座標（例：<code>2,-3</code>），按 Enter 射擊。</div>
+
+<div class="hint">
+  棋盤是 11×11 的整數格點（x、y 從 -5 到 5），有 10 個隱藏座標。<br>
+  60 秒內找出越多越好。命中會在棋盤上亮起橘色。
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlayTitle">時間到！</h2>
+  <div class="final-score"><span id="finalScore">0</span><span class="total"> / 10</span></div>
+  <div class="feedback" id="feedback"></div>
+  <button onclick="restart()">再玩一次</button>
+</div>
+
+<script>
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const MIN = -5, MAX = 5;
+  const TARGET_COUNT = 10;
+  const GAME_SECONDS = 60;
+
+  const PADDING = 40;
+  const SIZE = 528;
+  const PLOT = SIZE - PADDING * 2;
+  const STEP = PLOT / (MAX - MIN);
+
+  const board = document.getElementById("board");
+  const scoreEl = document.getElementById("score");
+  const timerEl = document.getElementById("timer");
+  const messageEl = document.getElementById("message");
+  const guessEl = document.getElementById("guess");
+  const submitBtn = document.getElementById("submitBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const overlay = document.getElementById("overlay");
+  const overlayTitle = document.getElementById("overlayTitle");
+  const finalScore = document.getElementById("finalScore");
+  const feedback = document.getElementById("feedback");
+
+  let targets = [];      // [{x, y, hit}]
+  let guessed = new Set(); // "x,y" strings
+  let score = 0;
+  let timeLeft = GAME_SECONDS;
+  let timerId = null;
+  let gameOver = false;
+
+  function toPx(x, y) {
+    // x: -5..5 → 0..PLOT；y 反向（畫面 y 朝下）
+    return {
+      cx: PADDING + (x - MIN) * STEP,
+      cy: PADDING + (MAX - y) * STEP
+    };
+  }
+
+  function drawGrid() {
+    board.innerHTML = "";
+
+    // 格線
+    for (let i = MIN; i <= MAX; i++) {
+      // 垂直
+      const xpx = PADDING + (i - MIN) * STEP;
+      const vline = document.createElementNS(SVG_NS, "line");
+      vline.setAttribute("x1", xpx); vline.setAttribute("y1", PADDING);
+      vline.setAttribute("x2", xpx); vline.setAttribute("y2", SIZE - PADDING);
+      vline.setAttribute("stroke", i === 0 ? "var(--grid-axis)" : "var(--grid)");
+      vline.setAttribute("stroke-width", i === 0 ? 2 : 1);
+      board.appendChild(vline);
+      // 水平
+      const ypx = PADDING + (MAX - i) * STEP;
+      const hline = document.createElementNS(SVG_NS, "line");
+      hline.setAttribute("x1", PADDING); hline.setAttribute("y1", ypx);
+      hline.setAttribute("x2", SIZE - PADDING); hline.setAttribute("y2", ypx);
+      hline.setAttribute("stroke", i === 0 ? "var(--grid-axis)" : "var(--grid)");
+      hline.setAttribute("stroke-width", i === 0 ? 2 : 1);
+      board.appendChild(hline);
+    }
+
+    // x、y 軸標籤
+    for (let i = MIN; i <= MAX; i++) {
+      if (i === 0) continue;
+      // x 軸數字（下方）
+      const xpx = PADDING + (i - MIN) * STEP;
+      const xLabel = document.createElementNS(SVG_NS, "text");
+      xLabel.setAttribute("x", xpx);
+      xLabel.setAttribute("y", PADDING + PLOT / 2 + 18);
+      xLabel.setAttribute("fill", "#888");
+      xLabel.setAttribute("font-size", "11");
+      xLabel.setAttribute("text-anchor", "middle");
+      xLabel.setAttribute("font-family", "monospace");
+      xLabel.textContent = i;
+      board.appendChild(xLabel);
+      // y 軸數字（左方）
+      const ypx = PADDING + (MAX - i) * STEP;
+      const yLabel = document.createElementNS(SVG_NS, "text");
+      yLabel.setAttribute("x", PADDING + PLOT / 2 - 8);
+      yLabel.setAttribute("y", ypx + 4);
+      yLabel.setAttribute("fill", "#888");
+      yLabel.setAttribute("font-size", "11");
+      yLabel.setAttribute("text-anchor", "end");
+      yLabel.setAttribute("font-family", "monospace");
+      yLabel.textContent = i;
+      board.appendChild(yLabel);
+    }
+
+    // 軸標籤 x、y
+    const xAxisLabel = document.createElementNS(SVG_NS, "text");
+    xAxisLabel.setAttribute("x", SIZE - PADDING + 10);
+    xAxisLabel.setAttribute("y", PADDING + PLOT / 2 + 4);
+    xAxisLabel.setAttribute("fill", "var(--accent)");
+    xAxisLabel.setAttribute("font-size", "14");
+    xAxisLabel.setAttribute("font-style", "italic");
+    xAxisLabel.textContent = "x";
+    board.appendChild(xAxisLabel);
+    const yAxisLabel = document.createElementNS(SVG_NS, "text");
+    yAxisLabel.setAttribute("x", PADDING + PLOT / 2);
+    yAxisLabel.setAttribute("y", PADDING - 12);
+    yAxisLabel.setAttribute("fill", "var(--accent)");
+    yAxisLabel.setAttribute("font-size", "14");
+    yAxisLabel.setAttribute("font-style", "italic");
+    yAxisLabel.setAttribute("text-anchor", "middle");
+    yAxisLabel.textContent = "y";
+    board.appendChild(yAxisLabel);
+  }
+
+  function generateTargets() {
+    targets = [];
+    const used = new Set();
+    while (targets.length < TARGET_COUNT) {
+      const x = Math.floor(Math.random() * (MAX - MIN + 1)) + MIN;
+      const y = Math.floor(Math.random() * (MAX - MIN + 1)) + MIN;
+      const key = `${x},${y}`;
+      if (!used.has(key)) {
+        used.add(key);
+        targets.push({ x, y, hit: false });
+      }
+    }
+  }
+
+  function markHit(x, y) {
+    const { cx, cy } = toPx(x, y);
+    const c = document.createElementNS(SVG_NS, "circle");
+    c.setAttribute("cx", cx);
+    c.setAttribute("cy", cy);
+    c.setAttribute("r", 10);
+    c.setAttribute("fill", "var(--hit)");
+    c.setAttribute("stroke", "#fff");
+    c.setAttribute("stroke-width", 2);
+    c.style.opacity = 0;
+    board.appendChild(c);
+    requestAnimationFrame(() => {
+      c.style.transition = "opacity 0.3s, r 0.3s";
+      c.style.opacity = 1;
+    });
+  }
+
+  function markMiss(x, y) {
+    const { cx, cy } = toPx(x, y);
+    const size = 6;
+    const g = document.createElementNS(SVG_NS, "g");
+    const l1 = document.createElementNS(SVG_NS, "line");
+    l1.setAttribute("x1", cx - size); l1.setAttribute("y1", cy - size);
+    l1.setAttribute("x2", cx + size); l1.setAttribute("y2", cy + size);
+    l1.setAttribute("stroke", "var(--miss)");
+    l1.setAttribute("stroke-width", 2);
+    const l2 = document.createElementNS(SVG_NS, "line");
+    l2.setAttribute("x1", cx - size); l2.setAttribute("y1", cy + size);
+    l2.setAttribute("x2", cx + size); l2.setAttribute("y2", cy - size);
+    l2.setAttribute("stroke", "var(--miss)");
+    l2.setAttribute("stroke-width", 2);
+    g.appendChild(l1); g.appendChild(l2);
+    board.appendChild(g);
+  }
+
+  function showUnhit() {
+    // 在剩下未命中的目標處畫虛線圈，當「答案揭曉」
+    targets.filter(t => !t.hit).forEach(t => {
+      const { cx, cy } = toPx(t.x, t.y);
+      const c = document.createElementNS(SVG_NS, "circle");
+      c.setAttribute("cx", cx);
+      c.setAttribute("cy", cy);
+      c.setAttribute("r", 10);
+      c.setAttribute("fill", "none");
+      c.setAttribute("stroke", "#888");
+      c.setAttribute("stroke-width", 2);
+      c.setAttribute("stroke-dasharray", "3,3");
+      board.appendChild(c);
+    });
+  }
+
+  function setMessage(text, cls = "") {
+    messageEl.textContent = text;
+    messageEl.className = "message " + cls;
+  }
+
+  function parseGuess(s) {
+    // 接受 "2,-3"、"2, -3"、"(2,-3)"、"2 -3" 等
+    const cleaned = s.replace(/[()\s]/g, "").trim();
+    const m = cleaned.match(/^(-?\d+),(-?\d+)$/);
+    if (!m) return null;
+    const x = parseInt(m[1], 10), y = parseInt(m[2], 10);
+    if (x < MIN || x > MAX || y < MIN || y > MAX) return { outOfRange: true };
+    return { x, y };
+  }
+
+  function submitGuess() {
+    if (gameOver) return;
+    const raw = guessEl.value.trim();
+    if (!raw) return;
+    const parsed = parseGuess(raw);
+    if (!parsed) {
+      setMessage(`「${raw}」格式錯誤。請輸入像「2,-3」這樣。`, "miss");
+      return;
+    }
+    if (parsed.outOfRange) {
+      setMessage(`座標超出 -5 到 5 範圍。`, "miss");
+      guessEl.value = "";
+      return;
+    }
+    const { x, y } = parsed;
+    const key = `${x},${y}`;
+    if (guessed.has(key)) {
+      setMessage(`(${x}, ${y}) 剛剛已經猜過了。`, "dup");
+      guessEl.value = "";
+      return;
+    }
+    guessed.add(key);
+    const hit = targets.find(t => t.x === x && t.y === y);
+    if (hit) {
+      hit.hit = true;
+      score++;
+      scoreEl.textContent = score;
+      markHit(x, y);
+      setMessage(`命中！(${x}, ${y}) ✦`, "hit");
+      if (score >= TARGET_COUNT) endGame(true);
+    } else {
+      markMiss(x, y);
+      setMessage(`沒中。(${x}, ${y}) 不是目標。`, "miss");
+    }
+    guessEl.value = "";
+  }
+
+  function tick() {
+    timeLeft--;
+    timerEl.textContent = timeLeft;
+    if (timeLeft <= 10) timerEl.style.color = "#ff5a3d";
+    if (timeLeft <= 0) endGame(false);
+  }
+
+  function endGame(allFound) {
+    gameOver = true;
+    clearInterval(timerId);
+    showUnhit();
+    finalScore.textContent = score;
+    if (allFound) {
+      overlayTitle.textContent = "全部命中！";
+      feedback.textContent = `用了 ${GAME_SECONDS - timeLeft} 秒，神射手 ✦`;
+    } else if (score >= 8) {
+      overlayTitle.textContent = "時間到！";
+      feedback.textContent = "很棒，差一點全中。";
+    } else if (score >= 5) {
+      overlayTitle.textContent = "時間到！";
+      feedback.textContent = "不錯，再多練幾次。";
+    } else if (score >= 1) {
+      overlayTitle.textContent = "時間到！";
+      feedback.textContent = "繼續加油，灰圈圈是沒找到的目標。";
+    } else {
+      overlayTitle.textContent = "時間到！";
+      feedback.textContent = "沒命中？灰圈圈就是答案，再來一次。";
+    }
+    overlay.classList.add("show");
+  }
+
+  function restart() {
+    score = 0;
+    timeLeft = GAME_SECONDS;
+    guessed = new Set();
+    gameOver = false;
+    scoreEl.textContent = "0";
+    timerEl.textContent = GAME_SECONDS;
+    timerEl.style.color = "";
+    overlay.classList.remove("show");
+    drawGrid();
+    generateTargets();
+    setMessage("輸入座標（例：2,-3），按 Enter 射擊。");
+    guessEl.value = "";
+    guessEl.focus();
+    clearInterval(timerId);
+    timerId = setInterval(tick, 1000);
+  }
+
+  // 事件
+  submitBtn.addEventListener("click", submitGuess);
+  restartBtn.addEventListener("click", () => {
+    if (confirm("確定要重新開始？")) restart();
+  });
+  guessEl.addEventListener("keydown", e => {
+    if (e.key === "Enter") submitGuess();
+  });
+
+  // 啟動
+  restart();
+</script>
+
+</body>
+</html>
